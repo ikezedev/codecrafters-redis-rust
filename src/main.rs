@@ -60,10 +60,7 @@ fn handle_requests(mut stream: TcpStream) {
                         let val = store
                             .get(&key)
                             .unwrap_or(&Value::BulkString(BulkString::Null));
-                        dbg!(val);
-                        let ret = val.to_string();
-                        dbg!(&ret);
-                        let _ = stream.write(ret.as_bytes());
+                        let _ = stream.write(val.to_string().as_bytes());
                     }
                 }
             }

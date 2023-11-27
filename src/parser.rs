@@ -162,7 +162,7 @@ impl ToString for Value {
     fn to_string(&self) -> String {
         match self {
             Value::String(entry) => format!("+{entry}\r\n"),
-            b @ Value::BulkString(_) => b.to_string(),
+            Value::BulkString(b) => b.to_string(),
             Value::Error(err) => format!(
                 "-{}{}{}",
                 err.title,
@@ -170,8 +170,8 @@ impl ToString for Value {
                 err.message
             ),
             Value::Int(int) => format!(":{}\r\n", int.to_string()),
-            a @ Value::Array(..) => a.to_string(),
-            Value::Unsupported => unimplemented!("Unsupported"),
+            Value::Array(a) => a.to_string(),
+            Value::Unsupported => "".to_string(),
         }
     }
 }
