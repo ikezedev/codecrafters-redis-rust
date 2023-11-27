@@ -1,17 +1,12 @@
-// Uncomment this block to pass the first stage
 use std::{
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
+    thread,
 };
 
 use thiserror::Error;
 
 fn main() {
-    // You can use print statements as follows for debugging, they'll be visible when running tests.
-    println!("Logs from your program will appear here!");
-
-    // Uncomment this block to pass the first stage
-    //
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
     for stream in listener.incoming() {
@@ -27,7 +22,7 @@ fn main() {
 }
 
 fn handle_requests(mut stream: TcpStream) {
-    loop {
+    thread::spawn(move || loop {
         let mut buffer = [0; 512];
         match stream.read(&mut buffer) {
             Ok(_) => {
@@ -37,7 +32,8 @@ fn handle_requests(mut stream: TcpStream) {
                 break;
             }
         }
-    }
+    });
+    // handle.join().expect("thread could not be joined");
 }
 
 #[derive(Error, Debug)]
