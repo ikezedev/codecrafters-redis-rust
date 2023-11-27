@@ -32,11 +32,10 @@ fn handle_requests(mut stream: TcpStream) {
         let mut buffer = [0; 512];
         match stream.read(&mut buffer) {
             Ok(_) => {
-                let message: RespMessage = parser(&String::from_utf8(buffer.to_vec()).unwrap())
-                    .unwrap()
-                    .1
-                    .try_into()
-                    .unwrap();
+                let entry = String::from_utf8(buffer.to_vec()).unwrap();
+
+                let message: RespMessage = parser(&entry).unwrap().1.try_into().unwrap();
+                dbg!(&message);
 
                 match message {
                     RespMessage::Ping => {

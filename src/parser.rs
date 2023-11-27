@@ -152,7 +152,7 @@ impl BulkString {
 impl ToString for BulkString {
     fn to_string(&self) -> String {
         match self {
-            BulkString::String(inner) => format!("$0\r\n{}\r\n", inner),
+            BulkString::String(inner) => format!("${}\r\n{}\r\n", inner.len(), inner),
             BulkString::Empty => "$0\r\n\r\n".to_string(),
             BulkString::Null => "$-1\r\n".to_string(),
         }

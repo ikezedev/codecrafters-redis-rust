@@ -1,5 +1,6 @@
 use crate::parser::{Array, BulkString, Value};
 
+#[derive(Debug)]
 pub enum RespMessage {
     Ping,
     Pong,
