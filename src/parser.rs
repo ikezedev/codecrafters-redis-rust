@@ -1,3 +1,8 @@
+use std::{
+    io::{self, Write},
+    net::TcpStream,
+};
+
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_until},
@@ -33,8 +38,6 @@ pub enum Value {
     Error(Error),
     Int(isize),
     Array(Array),
-    #[non_exhaustive]
-    Unsupported,
 }
 
 fn simple_str(input: &str) -> IResult<&str, Value> {
@@ -120,6 +123,12 @@ fn error(input: &str) -> IResult<&str, Value> {
     })(input)
 }
 
+impl Value {
+    pub fn reply(&self, stream: &mut TcpStream) -> io::Result<usize> {
+        stream.write(self.to_string().as_bytes())
+    }
+}
+
 impl From<&str> for BulkString {
     fn from(value: &str) -> Self {
         BulkString::String(value.to_string())
@@ -171,7 +180,6 @@ impl ToString for Value {
             ),
             Value::Int(int) => format!(":{}\r\n", int.to_string()),
             Value::Array(a) => a.to_string(),
-            Value::Unsupported => "".to_string(),
         }
     }
 }

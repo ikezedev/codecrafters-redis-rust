@@ -1,9 +1,14 @@
 use crate::parser::{Array, BulkString, Value};
 
+#[derive(Debug)]
 pub enum RespMessage {
     Ping,
     Echo(BulkString),
-    Set { key: String, val: Value },
+    Set {
+        key: String,
+        val: Value,
+        expiry: Option<usize>,
+    },
     Get(String),
 }
 
@@ -18,13 +23,30 @@ impl TryFrom<Value> for RespMessage {
                 {
                     Ok(RespMessage::Get(key.inner()))
                 }
-                [Value::BulkString(set), Value::BulkString(key), val]
+                [Value::BulkString(set), Value::BulkString(key), val, rest @ ..]
                     if set.inner().to_lowercase() == "set" =>
                 {
-                    Ok(RespMessage::Set {
-                        key: key.inner(),
-                        val: val.clone(),
-                    })
+                    match rest {
+                        [Value::BulkString(px), Value::BulkString(millis), ..]
+                            if px.inner().to_lowercase() == "px" =>
+                        {
+                            Ok(RespMessage::Set {
+                                key: key.inner(),
+                                val: val.clone(),
+                                expiry: Some(
+                                    millis
+                                        .inner()
+                                        .parse::<usize>()
+                                        .expect("could not parse expiry duration"),
+                                ),
+                            })
+                        }
+                        _ => Ok(RespMessage::Set {
+                            key: key.inner(),
+                            val: val.clone(),
+                            expiry: None,
+                        }),
+                    }
                 }
                 [Value::BulkString(fs), Value::BulkString(sec)]
                     if fs.inner().to_lowercase() == "echo" =>
