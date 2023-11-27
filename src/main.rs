@@ -1,6 +1,6 @@
 // Uncomment this block to pass the first stage
 use std::{
-    io::{self, Write},
+    io::{self, Read, Write},
     net::{TcpListener, TcpStream},
 };
 
@@ -27,7 +27,19 @@ fn main() {
 }
 
 fn handle_requests(mut stream: TcpStream) {
-    let _ = stream.write(b"+PONG\r\n");
+    loop {
+        let mut buffer = String::new();
+        match stream.read_to_string(&mut buffer) {
+            Ok(req) => {
+                println!("{req}");
+                let _ = stream.write(b"+PONG\r\n");
+                buffer.clear();
+            }
+            Err(_) => {
+                break;
+            }
+        }
+    }
 }
 
 #[derive(Error, Debug)]
