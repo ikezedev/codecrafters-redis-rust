@@ -1,9 +1,15 @@
+mod message;
+mod parser;
+
 use std::{
+    fmt::format,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
     thread,
 };
 
+use message::RespMessage;
+use parser::parser;
 use thiserror::Error;
 
 fn main() {
@@ -26,14 +32,27 @@ fn handle_requests(mut stream: TcpStream) {
         let mut buffer = [0; 512];
         match stream.read(&mut buffer) {
             Ok(_) => {
-                let _ = stream.write(b"+PONG\r\n");
+                let message: RespMessage = parser(&String::from_utf8(buffer.to_vec()).unwrap())
+                    .unwrap()
+                    .1
+                    .try_into()
+                    .unwrap();
+
+                match message {
+                    RespMessage::Ping => {
+                        let _ = stream.write(b"+PONG\r\n");
+                    }
+                    RespMessage::Pong => {}
+                    RespMessage::Echo(bs) => {
+                        let _ = stream.write(bs.to_string().as_bytes());
+                    }
+                }
             }
             Err(_) => {
                 break;
             }
         }
     });
-    // handle.join().expect("thread could not be joined");
 }
 
 #[derive(Error, Debug)]
