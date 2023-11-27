@@ -1,5 +1,3 @@
-use std::fmt::format;
-
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_until},
@@ -35,6 +33,7 @@ pub enum Value {
     Error(Error),
     Int(isize),
     Array(Array),
+    #[non_exhaustive]
     Unsupported,
 }
 
@@ -155,6 +154,40 @@ impl ToString for BulkString {
             BulkString::String(inner) => format!("${}\r\n{}\r\n", inner.len(), inner),
             BulkString::Empty => "$0\r\n\r\n".to_string(),
             BulkString::Null => "$-1\r\n".to_string(),
+        }
+    }
+}
+
+impl ToString for Value {
+    fn to_string(&self) -> String {
+        match self {
+            Value::String(entry) => format!("+{entry}\r\n"),
+            b @ Value::BulkString(_) => b.to_string(),
+            Value::Error(err) => format!(
+                "-{}{}{}",
+                err.title,
+                if err.message.is_empty() { "" } else { " " },
+                err.message
+            ),
+            Value::Int(int) => format!(":{}\r\n", int.to_string()),
+            a @ Value::Array(..) => a.to_string(),
+            Value::Unsupported => unimplemented!("Unsupported"),
+        }
+    }
+}
+
+impl ToString for Array {
+    fn to_string(&self) -> String {
+        match self {
+            Array::Items(arr) => {
+                format!(
+                    "*{}\r\n{}",
+                    arr.len(),
+                    arr.iter().map(ToString::to_string).collect::<String>()
+                )
+            }
+            Array::Empty => "*0\r\n".to_string(),
+            Array::Null => "*-1\r\n".to_string(),
         }
     }
 }

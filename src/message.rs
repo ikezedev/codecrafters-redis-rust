@@ -1,10 +1,10 @@
 use crate::parser::{Array, BulkString, Value};
 
-#[derive(Debug)]
 pub enum RespMessage {
     Ping,
-    Pong,
     Echo(BulkString),
+    Set { key: String, val: Value },
+    Get(String),
 }
 
 impl TryFrom<Value> for RespMessage {
@@ -13,6 +13,19 @@ impl TryFrom<Value> for RespMessage {
     fn try_from(value: Value) -> Result<Self, Self::Error> {
         match &value {
             Value::Array(Array::Items(entry)) => match entry.as_slice() {
+                [Value::BulkString(get), Value::BulkString(key)]
+                    if get.inner().to_lowercase() == "get" =>
+                {
+                    Ok(RespMessage::Get(key.inner()))
+                }
+                [Value::BulkString(set), Value::BulkString(key), val]
+                    if set.inner().to_lowercase() == "set" =>
+                {
+                    Ok(RespMessage::Set {
+                        key: key.inner(),
+                        val: val.clone(),
+                    })
+                }
                 [Value::BulkString(fs), Value::BulkString(sec)]
                     if fs.inner().to_lowercase() == "echo" =>
                 {
