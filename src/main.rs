@@ -28,12 +28,10 @@ fn main() {
 
 fn handle_requests(mut stream: TcpStream) {
     loop {
-        let mut buffer = String::new();
-        match stream.read_to_string(&mut buffer) {
-            Ok(req) => {
-                println!("{req}");
+        let mut buffer = [0; 512];
+        match stream.read(&mut buffer) {
+            Ok(_) => {
                 let _ = stream.write(b"+PONG\r\n");
-                buffer.clear();
             }
             Err(_) => {
                 break;
