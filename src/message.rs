@@ -10,6 +10,7 @@ pub enum RespMessage {
         expiry: Option<usize>,
     },
     Get(String),
+    ConfigGet(String),
 }
 
 impl TryFrom<Value> for RespMessage {
@@ -22,6 +23,12 @@ impl TryFrom<Value> for RespMessage {
                     if get.inner().to_lowercase() == "get" =>
                 {
                     Ok(RespMessage::Get(key.inner()))
+                }
+                [Value::BulkString(config), Value::BulkString(get), Value::BulkString(key)]
+                    if config.inner().to_lowercase() == "config"
+                        && get.inner().to_lowercase() == "get" =>
+                {
+                    Ok(RespMessage::ConfigGet(key.inner()))
                 }
                 [Value::BulkString(set), Value::BulkString(key), val, rest @ ..]
                     if set.inner().to_lowercase() == "set" =>

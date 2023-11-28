@@ -1,3 +1,4 @@
+mod config;
 mod message;
 mod parser;
 
@@ -5,10 +6,12 @@ use std::{
     collections::HashMap,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
+    sync::OnceLock,
     thread,
     time::{Duration, Instant},
 };
 
+use config::Config;
 use message::RespMessage;
 use parser::{parser, Value};
 use thiserror::Error;
@@ -33,7 +36,11 @@ impl DurableValue {
     }
 }
 
+static CONFIG: OnceLock<Config> = OnceLock::new();
+
 fn main() {
+    CONFIG.set(Config::new()).unwrap();
+
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
     for stream in listener.incoming() {
@@ -56,7 +63,6 @@ fn handle_requests(mut stream: TcpStream) {
             Ok(_) => {
                 let entry = String::from_utf8(buffer.to_vec()).unwrap();
 
-                dbg!(&entry);
                 let message: RespMessage = if let Ok((_, val)) = parser(&entry) {
                     val.try_into().unwrap()
                 } else {
@@ -102,6 +108,21 @@ fn handle_requests(mut stream: TcpStream) {
                             }
                         } else {
                             let _ = val.reply(&mut stream);
+                        }
+                    }
+                    RespMessage::ConfigGet(key) => {
+                        dbg!(&key);
+                        match &key[..] {
+                            "dir" => {
+                                let _ = CONFIG.get().unwrap().dir_to_value().reply(&mut stream);
+                            }
+                            "dbfilename" => {
+                                let _ =
+                                    CONFIG.get().unwrap().filename_to_value().reply(&mut stream);
+                            }
+                            _ => {
+                                eprintln!("unexpected config key: {key}");
+                            }
                         }
                     }
                 }
