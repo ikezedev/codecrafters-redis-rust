@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use itertools::Itertools;
 
-use crate::parser::{Array, BulkString, Value};
+use crate::parser::resp::{Array, BulkString, Value};
 
 #[derive(Default, Debug)]
 pub struct Config {

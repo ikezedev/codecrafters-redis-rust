@@ -4,6 +4,7 @@ mod parser;
 
 use std::{
     collections::HashMap,
+    fs::File,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
     sync::OnceLock,
@@ -13,10 +14,10 @@ use std::{
 
 use config::Config;
 use message::RespMessage;
-use parser::{parser, Value};
+use parser::resp::{parser, Value};
 use thiserror::Error;
 
-use crate::parser::BulkString;
+use crate::parser::resp::BulkString;
 
 #[derive(Debug, Clone, PartialEq)]
 struct DurableValue {
@@ -39,6 +40,11 @@ impl DurableValue {
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 fn main() {
+    let mut file = File::open("./integer_keys.rdb").unwrap();
+    let mut buffer = [0; 20];
+
+    file.read(&mut buffer).unwrap();
+    dbg!(buffer);
     CONFIG.set(Config::new()).unwrap();
 
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();

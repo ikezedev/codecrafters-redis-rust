@@ -1,4 +1,4 @@
-use crate::parser::{Array, BulkString, Value};
+use crate::parser::resp::{Array, BulkString, Value};
 
 #[derive(Debug)]
 pub enum RespMessage {
