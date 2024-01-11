@@ -25,8 +25,8 @@ impl TryFrom<Value> for RespMessage {
                 {
                     Ok(RespMessage::Get(key.inner()))
                 }
-                [Value::BulkString(key), Value::BulkString(key_value)]
-                    if key.inner().to_lowercase() == "key" =>
+                [Value::BulkString(keys), Value::BulkString(key_value)]
+                    if keys.inner().to_lowercase() == "keys" =>
                 {
                     Ok(RespMessage::Key(key_value.inner()))
                 }

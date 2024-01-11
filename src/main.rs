@@ -8,14 +8,17 @@ use std::{
     fs::File,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
-    sync::OnceLock,
+    sync::{Arc, OnceLock},
     thread,
     time::{Duration, Instant},
 };
 
 use config::Config;
 use message::RespMessage;
-use parser::resp::{parser, Value};
+use parser::{
+    rdb::RDB,
+    resp::{parser, Value},
+};
 use thiserror::Error;
 
 use crate::parser::resp::BulkString;
@@ -49,14 +52,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         .and_then(|c| c.dir_to_path().zip(c.filename()))
         .map(|(dir, name)| dir.join(name))
     {
-        eprintln!("{filename:?}");
-        let mut file = File::open(filename)?;
-        let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer)?;
-
-        parse_rdb(&buffer).map(|(_, res)| res).ok()
+        if filename.exists() {
+            let mut file = File::open(filename)?;
+            let mut buffer = Vec::new();
+            file.read_to_end(&mut buffer)?;
+            match parse_rdb(&buffer) {
+                Ok((_, rdb)) => Arc::new(Some(rdb)),
+                Err(err) => {
+                    eprintln!("{err}");
+                    unreachable!()
+                }
+            }
+        } else {
+            Arc::new(None)
+        }
     } else {
-        None
+        Arc::new(None)
     };
 
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
@@ -64,7 +75,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     for stream in listener.incoming() {
         match stream {
             Ok(stream) => {
-                handle_requests(stream);
+                handle_requests(stream, Arc::clone(&rdb));
             }
             Err(e) => {
                 println!("error: {}", e);
@@ -74,7 +85,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn handle_requests(mut stream: TcpStream) {
+fn handle_requests(mut stream: TcpStream, rdb: Arc<Option<RDB>>) {
     // use crate::parser::resp::Value::*;
 
     let mut store = HashMap::<String, DurableValue>::new();
@@ -89,7 +100,6 @@ fn handle_requests(mut stream: TcpStream) {
                 } else {
                     continue;
                 };
-                dbg!(&message);
 
                 match message {
                     RespMessage::Ping => {
@@ -143,9 +153,25 @@ fn handle_requests(mut stream: TcpStream) {
                         }
                     },
                     RespMessage::Key(key) => {
-                        let response: Value =
-                            Array::Items(vec![Value::BulkString(key.into())]).into();
-                        let _ = response.reply(&mut stream);
+                        eprintln!("key: {key}");
+                        // let value: Value = if let Some(db) = rdb.as_ref() {
+                        //     let items = db
+                        //         .get(&key)
+                        //         .into_iter()
+                        //         .map(|v| Value::from(v))
+                        //         .collect::<Vec<_>>();
+                        //     Array::Items(items).into()
+                        // } else {
+                        //     Array::Empty.into()
+                        // };
+                        let value: Value = if let Some(db) = rdb.as_ref() {
+                            let items = db.keys().map(|v| Value::from(v)).collect::<Vec<_>>();
+                            Array::Items(items).into()
+                        } else {
+                            Array::Empty.into()
+                        };
+
+                        let _ = value.reply(&mut stream);
                     }
                 }
             }

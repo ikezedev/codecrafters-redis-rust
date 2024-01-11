@@ -3,7 +3,7 @@ use nom::bytes::complete::{tag, take};
 use nom::combinator::{map, map_res, opt};
 
 use nom::error::{ErrorKind, FromExternalError};
-use nom::multi::many_till;
+use nom::multi::{many0, many_till};
 use nom::number::complete::{be_i16, be_i32, be_i8, be_u32, be_u64, be_u8};
 use nom::sequence::{pair, preceded};
 use nom::{IResult as NomResult, Parser};
@@ -15,11 +15,16 @@ type IResult<'a, T> = NomResult<&'a [u8], T>;
 
 impl<'a, T, U> ParseRDB<'a, T> for U where U: Parser<&'a [u8], T, nom::error::Error<&'a [u8]>> {}
 
-#[derive(Debug, Default, PartialEq)]
+#[derive(Debug, PartialEq)]
 pub struct RDB {
     pub version: u32,
-    pub auxilliary_field: Option<()>,
+    pub auxilliary_field: Vec<Auxilliary>,
     pub databases: Vec<DB>,
+}
+#[derive(Debug, PartialEq)]
+pub struct Auxilliary {
+    key: DBString,
+    value: DBString,
 }
 
 #[derive(PartialEq, Debug)]
@@ -43,22 +48,28 @@ pub struct DB {
 }
 
 impl RDB {
-    pub fn get(&self, key: &str) -> Option<&Value> {
-        for db in self.databases.iter() {
-            if let Some(value) = db.get(key) {
-                return Some(value);
-            }
-        }
-        None
+    #[allow(dead_code)]
+    pub fn get(&self, key: &str) -> Vec<&Value> {
+        self.databases.iter().flat_map(|db| db.get(key)).collect()
+    }
+
+    #[allow(dead_code)]
+    pub fn keys<'a>(&'a self) -> impl Iterator<Item = &'a DBString> + 'a {
+        self.databases.iter().flat_map(|db| db.keys())
     }
 }
 
 impl DB {
+    #[allow(dead_code)]
     fn get(&self, key: &str) -> Option<&Value> {
         self.key_value_pairs
             .iter()
-            .find(|KVPair { key: k, .. }| k == key)
+            .find(|KVPair { key: k, .. }| k.to_string() == key)
             .map(|k| &k.value)
+    }
+
+    pub fn keys<'a>(&'a self) -> impl Iterator<Item = &'a DBString> + 'a {
+        self.key_value_pairs.iter().map(|kv| &kv.key)
     }
 }
 
@@ -72,15 +83,20 @@ pub struct ResizeDBAttr {
 pub enum DBString {
     Int(i32),
     Str(String),
-    Lzf { clen: u32, ulen: u32, data: Vec<u8> },
+    #[allow(dead_code)]
+    Lzf {
+        clen: u32,
+        ulen: u32,
+        data: Vec<u8>,
+    },
 }
 
-impl PartialEq<str> for DBString {
-    fn eq(&self, other: &str) -> bool {
+impl ToString for DBString {
+    fn to_string(&self) -> String {
         match self {
-            DBString::Int(ref num) => &num.to_string() == other,
-            DBString::Str(s) => s == other,
-            DBString::Lzf { clen, ulen, data } => false,
+            DBString::Int(ref num) => num.to_string(),
+            DBString::Str(s) => s.to_owned(),
+            DBString::Lzf { .. } => String::new(),
         }
     }
 }
@@ -88,7 +104,7 @@ impl PartialEq<str> for DBString {
 impl PartialEq<str> for Value {
     fn eq(&self, other: &str) -> bool {
         match self {
-            Value::String(s) => s == other,
+            Value::String(s) => s.to_string() == other,
         }
     }
 }
@@ -96,6 +112,26 @@ impl PartialEq<str> for Value {
 #[derive(PartialEq, Debug)]
 pub enum Value {
     String(DBString),
+}
+
+impl From<&Value> for super::resp::Value {
+    fn from(value: &Value) -> Self {
+        match value {
+            Value::String(s) => s.into(),
+        }
+    }
+}
+
+impl From<Value> for super::resp::Value {
+    fn from(value: Value) -> Self {
+        (&value).into()
+    }
+}
+
+impl From<&DBString> for super::resp::Value {
+    fn from(value: &DBString) -> Self {
+        Self::String(value.to_string())
+    }
 }
 
 fn nom_error<'a, T>(input: &'a [u8], msg: impl Into<String>) -> IResult<'a, T> {
@@ -108,12 +144,13 @@ fn nom_error<'a, T>(input: &'a [u8], msg: impl Into<String>) -> IResult<'a, T> {
 
 pub fn parse_rdb<'a>(input: &'a [u8]) -> IResult<'a, RDB> {
     let (input, version) = header(input)?;
+    let (input, auxilliary_field) = auxilliary(input)?;
     let (input, (databases, _)) = many_till(db, tag([0xff]))(input)?;
 
     let res = RDB {
         version,
         databases,
-        auxilliary_field: None,
+        auxilliary_field,
     };
     return Ok((input, res));
 }
@@ -219,6 +256,14 @@ fn resize_db(input: &[u8]) -> IResult<Option<ResizeDBAttr>> {
             expire_hash_table_size: l2,
         }),
     ))(input)
+}
+
+fn auxilliary(input: &[u8]) -> IResult<Vec<Auxilliary>> {
+    let base = map(
+        preceded(tag([0xFA]), pair(string, string)),
+        |(key, value)| Auxilliary { key, value },
+    );
+    many0(base)(input)
 }
 
 fn db(input: &[u8]) -> IResult<DB> {
@@ -400,6 +445,22 @@ mod test {
 
         Ok(())
     }
+
+    #[test]
+    fn parse_aux() -> Result<(), Box<dyn Error>> {
+        let input = &[
+            250, 10, 114, 101, 100, 105, 115, 45, 98, 105, 116, 115, 192, 64, 250, 9, 114, 101,
+            100, 105, 115, 45, 118, 101, 114, 5, 55, 46, 50, 46, 48,
+        ];
+
+        let (input, aux) = auxilliary(input)?;
+
+        assert_eq!(input, &[]);
+        assert_eq!(aux.len(), 2);
+        dbg!(aux);
+
+        Ok(())
+    }
     #[test]
     fn db_number_parser() {
         let input: &[u8] = &[0xFE, 0x00];
@@ -415,6 +476,22 @@ mod test {
 
         let (input, rdb) = parse_rdb(&buf).unwrap();
         assert_eq!(input, &[]);
+        assert_eq!(rdb.version, 3);
+        dbg!(rdb);
+        Ok(())
+    }
+
+    #[test]
+    fn rdb2() -> Result<(), Box<dyn Error>> {
+        let input = &[
+            82, 69, 68, 73, 83, 48, 48, 48, 51, 250, 10, 114, 101, 100, 105, 115, 45, 98, 105, 116,
+            115, 192, 64, 250, 9, 114, 101, 100, 105, 115, 45, 118, 101, 114, 5, 55, 46, 50, 46,
+            48, 254, 0, 251, 1, 0, 0, 4, 112, 101, 97, 114, 10, 115, 116, 114, 97, 119, 98, 101,
+            114, 114, 121, 255, 255, 125, 246, 75, 211, 97, 140, 85, 10,
+        ];
+
+        let (input, rdb) = parse_rdb(input).unwrap();
+        // assert_eq!(input, &[]);
         assert_eq!(rdb.version, 3);
         dbg!(rdb);
         Ok(())
