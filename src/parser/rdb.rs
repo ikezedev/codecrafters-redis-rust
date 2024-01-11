@@ -49,8 +49,8 @@ pub struct DB {
 
 impl RDB {
     #[allow(dead_code)]
-    pub fn get(&self, key: &str) -> Vec<&Value> {
-        self.databases.iter().flat_map(|db| db.get(key)).collect()
+    pub fn get<'a, 'b: 'a>(&'a self, key: &'b str) -> impl Iterator<Item = &'a Value> + 'a {
+        self.databases.iter().flat_map(|db| db.get(key))
     }
 
     #[allow(dead_code)]
@@ -61,7 +61,7 @@ impl RDB {
 
 impl DB {
     #[allow(dead_code)]
-    fn get(&self, key: &str) -> Option<&Value> {
+    fn get<'a, 'b>(&'a self, key: &'b str) -> Option<&'a Value> {
         self.key_value_pairs
             .iter()
             .find(|KVPair { key: k, .. }| k.to_string() == key)

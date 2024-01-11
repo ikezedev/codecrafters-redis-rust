@@ -126,6 +126,14 @@ fn handle_requests(mut stream: TcpStream, rdb: Arc<Option<RDB>>) {
                         let _ = Value::String("OK".into()).reply(&mut stream);
                     }
                     RespMessage::Get(key) => {
+                        if let Some(db) = rdb.as_ref() {
+                            let item = db.get(&key).map(|v| Value::from(v)).next();
+                            if let Some(item) = item {
+                                let _ = item.reply(&mut stream);
+                                return;
+                            }
+                        };
+
                         let val = store.get(&key).unwrap_or(&DurableValue {
                             val: Value::BulkString(BulkString::Null),
                             timing: None,
@@ -152,18 +160,7 @@ fn handle_requests(mut stream: TcpStream, rdb: Arc<Option<RDB>>) {
                             eprintln!("unexpected config key: {key}");
                         }
                     },
-                    RespMessage::Key(key) => {
-                        eprintln!("key: {key}");
-                        // let value: Value = if let Some(db) = rdb.as_ref() {
-                        //     let items = db
-                        //         .get(&key)
-                        //         .into_iter()
-                        //         .map(|v| Value::from(v))
-                        //         .collect::<Vec<_>>();
-                        //     Array::Items(items).into()
-                        // } else {
-                        //     Array::Empty.into()
-                        // };
+                    RespMessage::Keys(_) => {
                         let value: Value = if let Some(db) = rdb.as_ref() {
                             let items = db.keys().map(|v| Value::from(v)).collect::<Vec<_>>();
                             Array::Items(items).into()
