@@ -1,10 +1,12 @@
+use std::time::Duration;
+
 use nom::branch::alt;
 use nom::bytes::complete::{tag, take};
 use nom::combinator::{map, map_res, opt};
 
 use nom::error::{ErrorKind, FromExternalError};
 use nom::multi::{many0, many_till};
-use nom::number::complete::{be_i16, be_i32, be_i8, be_u32, be_u64, be_u8};
+use nom::number::complete::{be_i16, be_i32, be_i8, be_u32, be_u8, le_u32, le_u64};
 use nom::sequence::{pair, preceded};
 use nom::{IResult as NomResult, Parser};
 
@@ -37,7 +39,7 @@ enum LenEncoded {
 pub struct KVPair {
     pub key: DBString,
     pub value: Value,
-    pub expiration: Option<u64>,
+    pub expiration: Option<Duration>,
 }
 
 #[derive(PartialEq, Debug)]
@@ -55,7 +57,12 @@ impl RDB {
 
     #[allow(dead_code)]
     pub fn keys<'a>(&'a self) -> impl Iterator<Item = &'a DBString> + 'a {
-        self.databases.iter().flat_map(|db| db.keys())
+        self.entries().map(|kv| &kv.key)
+    }
+
+    #[allow(dead_code)]
+    pub fn entries<'a>(&'a self) -> impl Iterator<Item = &'a KVPair> + 'a {
+        self.databases.iter().flat_map(|db| db.entries())
     }
 }
 
@@ -68,8 +75,13 @@ impl DB {
             .map(|k| &k.value)
     }
 
+    #[allow(dead_code)]
     pub fn keys<'a>(&'a self) -> impl Iterator<Item = &'a DBString> + 'a {
-        self.key_value_pairs.iter().map(|kv| &kv.key)
+        self.entries().map(|kv| &kv.key)
+    }
+
+    pub fn entries<'a>(&'a self) -> impl Iterator<Item = &'a KVPair> + 'a {
+        self.key_value_pairs.iter()
     }
 }
 
@@ -201,9 +213,10 @@ fn string(input: &[u8]) -> IResult<DBString> {
 fn kv_pair(input: &[u8]) -> IResult<KVPair> {
     let (input, variant) = opt(alt((tag([0xFD]), tag([0xFC]))))(input)?;
 
+    // The expiry is in little endian and wasn't documented
     let (input, expiration) = match variant {
-        Some([0xFD]) => map(be_u32, |n| Some(n.into()))(input)?,
-        Some([0xFC]) => map(be_u64, Some)(input)?,
+        Some([0xFD]) => map(le_u32, |n| Some(Duration::from_secs(n as u64)))(input)?,
+        Some([0xFC]) => map(le_u64, |n| Some(Duration::from_millis(n)))(input)?,
         _ => (input, None),
     };
 
@@ -490,8 +503,7 @@ mod test {
             114, 114, 121, 255, 255, 125, 246, 75, 211, 97, 140, 85, 10,
         ];
 
-        let (input, rdb) = parse_rdb(input).unwrap();
-        // assert_eq!(input, &[]);
+        let (_, rdb) = parse_rdb(input).unwrap();
         assert_eq!(rdb.version, 3);
         dbg!(rdb);
         Ok(())

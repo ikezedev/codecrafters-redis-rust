@@ -10,13 +10,13 @@ use std::{
     net::{TcpListener, TcpStream},
     sync::{Arc, OnceLock},
     thread,
-    time::{Duration, Instant},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use config::Config;
 use message::RespMessage;
 use parser::{
-    rdb::RDB,
+    rdb::KVPair,
     resp::{parser, Value},
 };
 use thiserror::Error;
@@ -27,13 +27,31 @@ use crate::parser::{rdb::parse_rdb, resp::Array};
 #[derive(Debug, Clone, PartialEq)]
 struct DurableValue {
     val: Value,
-    timing: Option<ValueTime>,
+    expiration: Expiration,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct ValueTime {
-    duration: Duration,
-    insert_at: Instant,
+#[derive(Debug, Clone, PartialEq, Default)]
+enum Expiration {
+    #[default]
+    Empty,
+    Date(SystemTime),
+    Period {
+        duration: Duration,
+        insert_at: Instant,
+    },
+}
+
+impl Expiration {
+    fn elapsed(&self) -> bool {
+        match self {
+            Expiration::Empty => false,
+            Expiration::Date(time) => SystemTime::now() >= *time,
+            Expiration::Period {
+                duration,
+                insert_at,
+            } => insert_at.elapsed() > *duration,
+        }
+    }
 }
 
 impl DurableValue {
@@ -55,19 +73,36 @@ fn main() -> Result<(), Box<dyn Error>> {
         if filename.exists() {
             let mut file = File::open(filename)?;
             let mut buffer = Vec::new();
+
             file.read_to_end(&mut buffer)?;
-            match parse_rdb(&buffer) {
-                Ok((_, rdb)) => Arc::new(Some(rdb)),
-                Err(err) => {
-                    eprintln!("{err}");
-                    unreachable!()
-                }
-            }
+
+            let (_, rdb) = parse_rdb(&buffer).map_err(|err| format!("{err}"))?;
+            let map = rdb
+                .entries()
+                .map(
+                    |KVPair {
+                         key,
+                         value,
+                         expiration,
+                     }| {
+                        (
+                            key.to_string(),
+                            DurableValue {
+                                val: Value::from(value),
+                                expiration: expiration
+                                    .map(|exp| Expiration::Date(UNIX_EPOCH + exp))
+                                    .unwrap_or_default(),
+                            },
+                        )
+                    },
+                )
+                .collect::<HashMap<_, _>>();
+            Arc::new(map)
         } else {
-            Arc::new(None)
+            Arc::new(HashMap::default())
         }
     } else {
-        Arc::new(None)
+        Arc::new(HashMap::default())
     };
 
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
@@ -85,10 +120,17 @@ fn main() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn handle_requests(mut stream: TcpStream, rdb: Arc<Option<RDB>>) {
-    // use crate::parser::resp::Value::*;
+pub fn now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("Time cannot go before 1970 with this implementation")
+        .as_millis() as u64
+}
 
-    let mut store = HashMap::<String, DurableValue>::new();
+fn handle_requests(mut stream: TcpStream, rdb: Arc<HashMap<String, DurableValue>>) {
+    let mut store: HashMap<String, DurableValue> =
+        HashMap::from_iter(rdb.iter().map(|(k, v)| (k.clone(), v.clone())));
+
     thread::spawn(move || loop {
         let mut buffer = [0; 512];
         match stream.read(&mut buffer) {
@@ -114,44 +156,34 @@ fn handle_requests(mut stream: TcpStream, rdb: Arc<Option<RDB>>) {
                                 key,
                                 DurableValue {
                                     val,
-                                    timing: Some(ValueTime {
+                                    expiration: Expiration::Period {
                                         duration: Duration::from_millis(millis as u64),
                                         insert_at: Instant::now(),
-                                    }),
+                                    },
                                 },
                             );
                         } else {
-                            store.insert(key, DurableValue { val, timing: None });
+                            store.insert(
+                                key,
+                                DurableValue {
+                                    val,
+                                    expiration: Expiration::Empty,
+                                },
+                            );
                         }
                         let _ = Value::String("OK".into()).reply(&mut stream);
                     }
                     RespMessage::Get(key) => {
-                        let mut handled = false;
-                        if let Some(db) = rdb.as_ref() {
-                            eprintln!("{db:?}");
-                            let item = db.get(&key).map(|v| Value::from(v)).next();
-                            eprintln!("{item:?}");
-                            if let Some(item) = item {
-                                let _ = item.reply(&mut stream);
-                                handled = true;
-                            }
-                        };
+                        let val = store.get(&key).unwrap_or(&DurableValue {
+                            val: Value::BulkString(BulkString::Null),
+                            expiration: Expiration::Empty,
+                        });
 
-                        if !handled {
-                            let val = store.get(&key).unwrap_or(&DurableValue {
-                                val: Value::BulkString(BulkString::Null),
-                                timing: None,
-                            });
-                            if let Some(timing) = &val.timing {
-                                if timing.insert_at.elapsed() > timing.duration {
-                                    store.remove(&key);
-                                    let _ = Value::BulkString(BulkString::Null).reply(&mut stream);
-                                } else {
-                                    let _ = val.reply(&mut stream);
-                                }
-                            } else {
-                                let _ = val.reply(&mut stream);
-                            }
+                        if val.expiration.elapsed() {
+                            store.remove(&key);
+                            let _ = Value::BulkString(BulkString::Null).reply(&mut stream);
+                        } else {
+                            let _ = val.reply(&mut stream);
                         }
                     }
                     RespMessage::ConfigGet(key) => match &key[..] {
@@ -166,12 +198,11 @@ fn handle_requests(mut stream: TcpStream, rdb: Arc<Option<RDB>>) {
                         }
                     },
                     RespMessage::Keys(_) => {
-                        let value: Value = if let Some(db) = rdb.as_ref() {
-                            let items = db.keys().map(|v| Value::from(v)).collect::<Vec<_>>();
-                            Array::Items(items).into()
-                        } else {
-                            Array::Empty.into()
-                        };
+                        let keys = store
+                            .keys()
+                            .map(|k| BulkString::String(k.to_string()).into())
+                            .collect();
+                        let value: Value = Array::Items(keys).into();
 
                         let _ = value.reply(&mut stream);
                     }
