@@ -135,6 +135,12 @@ impl From<&str> for BulkString {
     }
 }
 
+impl From<String> for BulkString {
+    fn from(value: String) -> Self {
+        BulkString::String(value)
+    }
+}
+
 impl From<BulkString> for Value {
     fn from(value: BulkString) -> Self {
         Value::BulkString(value)

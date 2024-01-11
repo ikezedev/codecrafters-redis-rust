@@ -18,6 +18,7 @@ use parser::resp::{parser, Value};
 use thiserror::Error;
 
 use crate::parser::resp::BulkString;
+use crate::parser::{rdb::parse_rdb, resp::Array};
 
 #[derive(Debug, Clone, PartialEq)]
 struct DurableValue {
@@ -40,12 +41,17 @@ impl DurableValue {
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
 fn main() {
-    let mut file = File::open("./integer_keys.rdb").unwrap();
-    let mut buffer = [0; 20];
-
-    file.read(&mut buffer).unwrap();
-    dbg!(buffer);
     CONFIG.set(Config::new()).unwrap();
+
+    let mut file = File::open(CONFIG.get().unwrap().filename().unwrap());
+    let rdb = if let Ok(mut file) = file {
+        let mut buffer = Vec::new();
+        file.read_to_end(&mut buffer).unwrap();
+
+        parse_rdb(&buffer).map(|(_, res)| res).ok()
+    } else {
+        None
+    };
 
     let listener = TcpListener::bind("127.0.0.1:6379").unwrap();
 
@@ -62,6 +68,8 @@ fn main() {
 }
 
 fn handle_requests(mut stream: TcpStream) {
+    // use crate::parser::resp::Value::*;
+
     let mut store = HashMap::<String, DurableValue>::new();
     thread::spawn(move || loop {
         let mut buffer = [0; 512];
@@ -116,20 +124,21 @@ fn handle_requests(mut stream: TcpStream) {
                             let _ = val.reply(&mut stream);
                         }
                     }
-                    RespMessage::ConfigGet(key) => {
-                        dbg!(&key);
-                        match &key[..] {
-                            "dir" => {
-                                let _ = CONFIG.get().unwrap().dir_to_value().reply(&mut stream);
-                            }
-                            "dbfilename" => {
-                                let _ =
-                                    CONFIG.get().unwrap().filename_to_value().reply(&mut stream);
-                            }
-                            _ => {
-                                eprintln!("unexpected config key: {key}");
-                            }
+                    RespMessage::ConfigGet(key) => match &key[..] {
+                        "dir" => {
+                            let _ = CONFIG.get().unwrap().dir_to_value().reply(&mut stream);
                         }
+                        "dbfilename" => {
+                            let _ = CONFIG.get().unwrap().filename_to_value().reply(&mut stream);
+                        }
+                        _ => {
+                            eprintln!("unexpected config key: {key}");
+                        }
+                    },
+                    RespMessage::Key(key) => {
+                        let response: Value =
+                            Array::Items(vec![Value::BulkString(key.into())]).into();
+                        let _ = response.reply(&mut stream);
                     }
                 }
             }

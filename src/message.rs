@@ -11,6 +11,7 @@ pub enum RespMessage {
     },
     Get(String),
     ConfigGet(String),
+    Key(String),
 }
 
 impl TryFrom<Value> for RespMessage {
@@ -23,6 +24,11 @@ impl TryFrom<Value> for RespMessage {
                     if get.inner().to_lowercase() == "get" =>
                 {
                     Ok(RespMessage::Get(key.inner()))
+                }
+                [Value::BulkString(key), Value::BulkString(key_value)]
+                    if key.inner().to_lowercase() == "key" =>
+                {
+                    Ok(RespMessage::Key(key_value.inner()))
                 }
                 [Value::BulkString(config), Value::BulkString(get), Value::BulkString(key)]
                     if config.inner().to_lowercase() == "config"

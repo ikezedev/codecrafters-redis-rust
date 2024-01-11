@@ -66,7 +66,6 @@ impl Config {
             .unwrap_or(Array::Empty.into())
     }
 
-    #[allow(dead_code)]
     pub fn filename(&self) -> Option<String> {
         self.filename.as_ref().map(ToString::to_string)
     }
