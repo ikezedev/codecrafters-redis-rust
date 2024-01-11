@@ -44,7 +44,12 @@ static CONFIG: OnceLock<Config> = OnceLock::new();
 fn main() -> Result<(), Box<dyn Error>> {
     CONFIG.set(Config::new()).unwrap();
 
-    let rdb = if let Some(filename) = CONFIG.get().and_then(|c| c.filename()) {
+    let rdb = if let Some(filename) = CONFIG
+        .get()
+        .and_then(|c| c.dir_to_path().zip(c.filename()))
+        .map(|(dir, name)| dir.join(name))
+    {
+        eprintln!("{filename:?}");
         let mut file = File::open(filename)?;
         let mut buffer = Vec::new();
         file.read_to_end(&mut buffer)?;
