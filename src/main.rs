@@ -4,6 +4,7 @@ mod parser;
 
 use std::{
     collections::HashMap,
+    error::Error,
     fs::File,
     io::{self, Read, Write},
     net::{TcpListener, TcpStream},
@@ -40,13 +41,13 @@ impl DurableValue {
 
 static CONFIG: OnceLock<Config> = OnceLock::new();
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     CONFIG.set(Config::new()).unwrap();
 
-    let mut file = File::open(CONFIG.get().unwrap().filename().unwrap());
-    let rdb = if let Ok(mut file) = file {
+    let rdb = if let Some(filename) = CONFIG.get().and_then(|c| c.filename()) {
+        let mut file = File::open(filename)?;
         let mut buffer = Vec::new();
-        file.read_to_end(&mut buffer).unwrap();
+        file.read_to_end(&mut buffer)?;
 
         parse_rdb(&buffer).map(|(_, res)| res).ok()
     } else {
@@ -65,6 +66,7 @@ fn main() {
             }
         }
     }
+    Ok(())
 }
 
 fn handle_requests(mut stream: TcpStream) {
