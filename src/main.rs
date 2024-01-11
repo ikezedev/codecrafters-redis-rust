@@ -126,26 +126,32 @@ fn handle_requests(mut stream: TcpStream, rdb: Arc<Option<RDB>>) {
                         let _ = Value::String("OK".into()).reply(&mut stream);
                     }
                     RespMessage::Get(key) => {
+                        let mut handled = false;
                         if let Some(db) = rdb.as_ref() {
+                            eprintln!("{db:?}");
                             let item = db.get(&key).map(|v| Value::from(v)).next();
+                            eprintln!("{item:?}");
                             if let Some(item) = item {
                                 let _ = item.reply(&mut stream);
-                                return;
+                                handled = true;
                             }
                         };
-                        let val = store.get(&key).unwrap_or(&DurableValue {
-                            val: Value::BulkString(BulkString::Null),
-                            timing: None,
-                        });
-                        if let Some(timing) = &val.timing {
-                            if timing.insert_at.elapsed() > timing.duration {
-                                store.remove(&key);
-                                let _ = Value::BulkString(BulkString::Null).reply(&mut stream);
+
+                        if !handled {
+                            let val = store.get(&key).unwrap_or(&DurableValue {
+                                val: Value::BulkString(BulkString::Null),
+                                timing: None,
+                            });
+                            if let Some(timing) = &val.timing {
+                                if timing.insert_at.elapsed() > timing.duration {
+                                    store.remove(&key);
+                                    let _ = Value::BulkString(BulkString::Null).reply(&mut stream);
+                                } else {
+                                    let _ = val.reply(&mut stream);
+                                }
                             } else {
                                 let _ = val.reply(&mut stream);
                             }
-                        } else {
-                            let _ = val.reply(&mut stream);
                         }
                     }
                     RespMessage::ConfigGet(key) => match &key[..] {
