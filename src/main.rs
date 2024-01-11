@@ -133,7 +133,6 @@ fn handle_requests(mut stream: TcpStream, rdb: Arc<Option<RDB>>) {
                                 return;
                             }
                         };
-
                         let val = store.get(&key).unwrap_or(&DurableValue {
                             val: Value::BulkString(BulkString::Null),
                             timing: None,
